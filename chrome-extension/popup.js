@@ -1,6 +1,7 @@
-const { defaults, normalize } = globalThis.MauseSeriTikSettings;
+const { defaults, normalize, rates } = globalThis.MauseSeriTikSettings;
 const form = document.querySelector("form");
 const mode = document.querySelector("#mode");
+const profile = document.querySelector("#profile");
 const rate = document.querySelector("#rate");
 const burst = document.querySelector("#burst");
 const burstField = document.querySelector("#burst-field");
@@ -12,6 +13,7 @@ const toggle = document.querySelector("#toggle");
 let tabId = null;
 let enabled = false;
 let pendingSave = Promise.resolve();
+let selected = defaults;
 
 function setStatus(text, state = "") {
   status.textContent = text;
@@ -26,6 +28,11 @@ function renderActivation() {
 }
 
 function renderSettings() {
+  mode.value = selected.mode;
+  profile.value = selected.profile;
+  rate.max = rates[selected.profile];
+  rate.value = selected.profile === "game" ? selected.gameRate : selected.rate;
+  burst.value = selected.burst;
   rateValue.value = `${rate.value} tık/sn`;
   burstValue.value = burst.value;
   rate.setAttribute("aria-valuetext", `${rate.value} tıklama/saniye`);
@@ -33,39 +40,60 @@ function renderSettings() {
   burstField.setAttribute("aria-disabled", String(burst.disabled));
 }
 
-function readSettings() {
-  return normalize({ mode: mode.value, rate: rate.valueAsNumber, burst: burst.valueAsNumber });
+function changeSettings(event) {
+  const next = {
+    ...selected, mode: mode.value, profile: profile.value, burst: burst.valueAsNumber,
+  };
+  if (event.target === rate) {
+    const rateKey = next.profile === "game" ? "gameRate" : "rate";
+    next[rateKey] = rate.valueAsNumber;
+  }
+  selected = normalize(next);
+  renderSettings();
 }
 
-async function send(action, settings) {
+async function send(action, settings, options, sessionId) {
   try {
     return await chrome.tabs.sendMessage(
       tabId,
-      { namespace: "mause-seri-tik", action, settings },
-      { frameId: 0 },
+      { namespace: "mause-seri-tik", action, settings, sessionId },
+      options,
     );
   } catch {
     return null;
   }
 }
 
+function tabStatus() {
+  return send("status", undefined, { frameId: 0 });
+}
+
+async function enableTab() {
+  const files = ["settings.js", "content.js"];
+  let frames;
+  try {
+    frames = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files });
+  } catch {
+    // Chrome can reject the whole injection if a frame is on a different origin.
+    frames = await chrome.scripting.executeScript({ target: { tabId }, files });
+  }
+
+  const sessionId = crypto.randomUUID();
+  await Promise.all(frames.map(({ frameId, documentId }) =>
+    send("enable", selected, documentId ? { documentId } : { frameId }, sessionId),
+  ));
+}
+
 async function toggleExtension() {
   toggle.disabled = true;
   try {
     await pendingSave;
-    let response;
     if (enabled) {
-      response = await send("disable");
+      await send("disable");
     } else {
-      const current = await send("status");
-      if (!current) {
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          files: ["settings.js", "content.js"],
-        });
-      }
-      response = await send("enable", readSettings());
+      await enableTab();
     }
+    const response = await tabStatus();
     enabled = response?.enabled === true;
     if (response) {
       renderActivation();
@@ -79,12 +107,14 @@ async function toggleExtension() {
   }
 }
 
-function saveSettings() {
-  const settings = readSettings();
+function saveSettings(event) {
+  changeSettings(event);
+  const settings = selected;
   pendingSave = pendingSave.then(async () => {
     await chrome.storage.local.set({ settings });
     if (enabled) {
-      const response = await send("update", settings);
+      await send("update", settings);
+      const response = await tabStatus();
       enabled = response?.enabled === true;
       renderActivation();
     }
@@ -95,13 +125,10 @@ function saveSettings() {
 
 async function initialize() {
   const { settings = defaults } = await chrome.storage.local.get("settings");
-  const saved = normalize(settings);
-  mode.value = saved.mode;
-  rate.value = saved.rate;
-  burst.value = saved.burst;
+  selected = normalize(settings);
   renderSettings();
 
-  form.addEventListener("input", renderSettings);
+  form.addEventListener("input", changeSettings);
   form.addEventListener("change", saveSettings);
   toggle.addEventListener("click", toggleExtension);
 
@@ -112,7 +139,7 @@ async function initialize() {
   }
 
   tabId = tab.id;
-  const response = await send("status");
+  const response = await tabStatus();
   enabled = response?.enabled === true;
   renderActivation();
   toggle.disabled = false;

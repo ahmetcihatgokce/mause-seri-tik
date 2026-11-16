@@ -11,19 +11,31 @@
   ]);
   let settings = defaults;
   let controls = null;
+  let sessionId = null;
+  let stopChannel = null;
   let press = null;
   let timeout = null;
 
-  function stopSequence() {
+  function stopSequence(release = "both") {
     window.clearTimeout(timeout);
     timeout = null;
+    const current = press;
     press = null;
+    if (current?.syntheticDown && release !== "native") {
+      finishSyntheticPress(current, release);
+    }
   }
 
-  function stopExtension() {
-    stopSequence();
+  function stopExtension(notify = false) {
+    if (notify) {
+      stopChannel?.postMessage("stop");
+    }
+    stopChannel?.close();
+    stopChannel = null;
+    sessionId = null;
     controls?.abort();
     controls = null;
+    stopSequence();
   }
 
   function pointerPosition(event) {
@@ -39,43 +51,58 @@
     };
   }
 
-  function dispatchClick(current) {
-    const { target, pointerId, position, otherButtons } = current;
-    const common = {
-      ...position,
+  function mouseDetails(current, buttons) {
+    return {
+      ...current.position,
       bubbles: true,
       cancelable: true,
       composed: true,
       view: window,
       button: 0,
+      buttons,
     };
-    const pointer = { ...common, pointerId, pointerType: "mouse", isPrimary: true };
+  }
 
-    target.dispatchEvent(new PointerEvent("pointerdown", {
-      ...pointer, buttons: otherButtons | 1, pressure: 0.5,
-    }));
-    target.dispatchEvent(new MouseEvent("mousedown", {
-      ...common, buttons: otherButtons | 1, detail: 1,
-    }));
-    target.dispatchEvent(new PointerEvent("pointerup", {
-      ...pointer, buttons: otherButtons,
-    }));
-    target.dispatchEvent(new MouseEvent("mouseup", {
-      ...common, buttons: otherButtons, detail: 1,
-    }));
-    target.dispatchEvent(new PointerEvent("click", {
-      ...pointer, buttons: otherButtons, detail: 1,
+  function dispatchPointer(current, type, details) {
+    current.target.dispatchEvent(new PointerEvent(type, {
+      ...details, pointerId: current.pointerId, pointerType: "mouse", isPrimary: true,
     }));
   }
 
-  function schedule() {
-    if (!press || (settings.mode === "burst" && press.burstRemaining === 0)) {
-      stopSequence();
+  function dispatchDown(current) {
+    current.syntheticDown = true;
+    const details = mouseDetails(current, current.otherButtons | 1);
+    dispatchPointer(current, "pointerdown", { ...details, pressure: 0.5 });
+    if (press === current) {
+      current.target.dispatchEvent(new MouseEvent("mousedown", { ...details, detail: 1 }));
+    }
+  }
+
+  function dispatchUp(current, release = "both") {
+    const details = mouseDetails(current, current.otherButtons);
+    dispatchPointer(current, "pointerup", details);
+    if (release === "both") {
+      current.target.dispatchEvent(new MouseEvent("mouseup", { ...details, detail: 1 }));
+    }
+  }
+
+  function finishSyntheticPress(current, release = "both", click = false) {
+    current.syntheticDown = false;
+    dispatchUp(current, release);
+    if (click && press === current) {
+      const details = mouseDetails(current, current.otherButtons);
+      dispatchPointer(current, "click", { ...details, detail: 1 });
+    }
+  }
+
+  function schedule(current) {
+    if (press !== current) {
       return;
     }
-
-    if (timeout === null) {
-      timeout = window.setTimeout(tick, Math.ceil(1000 / settings.rate));
+    if (current.remaining > 0 || current.syntheticDown) {
+      timeout = window.setTimeout(tick, current.delay);
+    } else {
+      stopSequence();
     }
   }
 
@@ -87,11 +114,20 @@
       return;
     }
 
-    if (settings.mode === "burst") {
-      current.burstRemaining -= 1;
+    if (current.initialGameRelease) {
+      // Give a frame-polled game a released interval after the natural press.
+      current.initialGameRelease = false;
+      dispatchUp(current);
+    } else if (current.syntheticDown) {
+      finishSyntheticPress(current, "both", true);
+    } else {
+      current.remaining -= 1;
+      dispatchDown(current);
+      if (current.fast && press === current) {
+        finishSyntheticPress(current, "both", true);
+      }
     }
-    dispatchClick(current);
-    schedule();
+    schedule(current);
   }
 
   function isTypingTarget(target) {
@@ -111,25 +147,34 @@
       return;
     }
 
+    const fast = settings.profile === "fast";
     press = {
       target,
       pointerId: event.pointerId,
       position: pointerPosition(event),
       otherButtons: event.buttons & ~1,
-      burstRemaining: settings.burst - 1,
+      remaining: settings.mode === "burst" ? settings.burst - 1 : Infinity,
+      delay: fast ? Math.ceil(1000 / settings.rate) : Math.ceil(500 / settings.gameRate),
+      initialGameRelease: !fast,
+      syntheticDown: false,
+      fast,
     };
-    schedule();
+    schedule(press);
   }
 
   function onPointerUp(event) {
     if (event.isTrusted && press?.pointerId === event.pointerId && !(event.buttons & 1)) {
-      stopSequence();
+      stopSequence("native");
     }
   }
 
   function onMouseUp(event) {
     if (event.isTrusted && event.button === 0) {
-      stopSequence();
+      if (press) {
+        press.otherButtons = event.buttons & ~1;
+      }
+      // A chorded mouseup has no corresponding native pointerup.
+      stopSequence(event.buttons & ~1 ? "pointer" : "native");
     }
   }
 
@@ -146,12 +191,11 @@
     if (!press || press.pointerId !== event.pointerId) {
       return;
     }
-    if (!(event.buttons & 1)) {
-      stopSequence();
-      return;
-    }
     press.position = pointerPosition(event);
     press.otherButtons = event.buttons & ~1;
+    if (!(event.buttons & 1)) {
+      stopSequence(event.button === 0 && press.otherButtons ? "pointer" : "both");
+    }
   }
 
   function onPointerCancel(event) {
@@ -173,18 +217,33 @@
   }
 
   function onPointerLockChange() {
-    if (!document.pointerLockElement) {
-      stopExtension();
+    const target = document.pointerLockElement;
+    if (!target) {
+      stopSequence();
+    } else if (press && !press.syntheticDown) {
+      press.target = target;
     }
   }
 
   function onKeyDown(event) {
     if (event.isTrusted && event.key === "Escape") {
-      stopExtension();
+      stopExtension(true);
     }
   }
 
-  function enable() {
+  function enable(nextSessionId) {
+    stopSequence();
+    stopChannel?.close();
+    sessionId = typeof nextSessionId === "string" ? nextSessionId : null;
+    stopChannel = sessionId ? new BroadcastChannel(`mause-seri-tik:${sessionId}`) : null;
+    if (stopChannel) {
+      stopChannel.onmessage = event => {
+        if (event.data === "stop") {
+          stopExtension();
+        }
+      };
+    }
+
     if (controls) {
       return;
     }
@@ -198,8 +257,8 @@
     window.addEventListener("pointercancel", onPointerCancel, listenerOptions);
     window.addEventListener("mouseout", onMouseOut, listenerOptions);
     window.addEventListener("keydown", onKeyDown, listenerOptions);
-    window.addEventListener("blur", stopSequence, { signal: controls.signal });
-    window.addEventListener("pagehide", stopExtension, listenerOptions);
+    window.addEventListener("blur", () => stopSequence(), { signal: controls.signal });
+    window.addEventListener("pagehide", () => stopExtension(), listenerOptions);
     document.addEventListener("visibilitychange", onVisibilityChange, listenerOptions);
     document.addEventListener("pointerlockchange", onPointerLockChange, listenerOptions);
   }
@@ -218,7 +277,7 @@
         break;
       case "enable":
         settings = normalize(message.settings);
-        enable();
+        enable(message.sessionId);
         break;
       case "disable":
         stopExtension();
@@ -226,6 +285,6 @@
       default:
         return;
     }
-    reply({ enabled: controls !== null });
+    reply({ enabled: controls !== null, sessionId, settings });
   });
 })();

@@ -27,12 +27,18 @@
           <option value="burst">Sınırlı seri</option>
         </select>
 
+        <label for="profile">Tıklama profili</label>
+        <select id="profile">
+          <option value="game">Oyun</option>
+          <option value="fast">Hızlı</option>
+        </select>
+
         <div class="range-field">
           <div class="range-heading">
             <label for="rate">Hedef hız</label>
-            <output for="rate" id="rate-value">250 tık/sn</output>
+            <output for="rate" id="rate-value">20 tık/sn</output>
           </div>
-          <input type="range" id="rate" min="1" max="250" value="250">
+          <input type="range" id="rate" min="1" max="25" value="20">
         </div>
 
         <div class="range-field" id="burst-field">

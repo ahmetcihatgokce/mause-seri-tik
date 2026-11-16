@@ -6,7 +6,7 @@ Sol fare tuşuna basınca ilk tıklaman normal çalışır. Tuş basılı kaldı
 
 | Paket | Kullanım alanı | Hedef hız |
 | --- | --- | ---: |
-| `Mause-Seri-Tik-Chrome.zip` | Etkinleştirdiğin Chrome sekmesi | En fazla 250 tık/sn |
+| `Mause-Seri-Tik-Chrome.zip` | Etkinleştirdiğin Chrome sekmesi | Oyun profili 25, Hızlı profil 250 tık/sn |
 | `Mause-Seri-Tik.exe` | Windows 10 veya 11'de seçtiğin pencere | En fazla 500 tık/sn |
 
 ## Chrome
@@ -14,9 +14,13 @@ Sol fare tuşuna basınca ilk tıklaman normal çalışır. Tuş basılı kaldı
 1. `Mause-Seri-Tik-Chrome.zip` dosyasını bir klasöre çıkar.
 2. Chrome adres çubuğuna `chrome://extensions` yaz. **Geliştirici modu** seçeneğini aç ve **Paketlenmemiş öğe yükle** düğmesine bas.
 3. `manifest.json` dosyasını içeren klasörü seç.
-4. Kullanacağın sekmeyi aç. Eklentinin simgesinden modu ve hızı seçip **Bu sekmede başlat** düğmesine bas.
+4. Kullanacağın sekmeyi aç. Eklentinin simgesinden profili, modu ve hızı seçip **Bu sekmede başlat** düğmesine bas.
 
-Sol tuşla dene. `Esc` eklentiyi o sayfada kapatır. Sekmeyi yenilediğinde veya yeni bir sayfa açtığında eklentiyi yeniden etkinleştir. Chrome sürümü web sayfasının ana çerçevesinde çalışır. Sayfa kodundan oluşturulan olayların `isTrusted` değeri `false` olduğundan bazı oyunlar bunları yok sayabilir.
+**Combat Online** için [oyun sayfasını](https://nadgames.com/combat_online) aç, oyunun yüklenmesini bekle ve **Oyun** profilini seç. Bu profil fare basışı ile bırakışı arasına süre koyar. **Hızlı** profil tıklama olayını doğrudan işleyen sayfalar içindir.
+
+Sol tuşla dene. `Esc` eklentiyi o sekmede kapatır. Sayfayı yenilediğinde eklentiyi yeniden başlat. Eklenti ana sayfada ve Chrome'un erişim verdiği gömülü çerçevelerde çalışır. Oyun başka bir alan adındaki çerçevedeyse doğrudan oyun sayfasını aç. Chrome sürümünün ürettiği olayların `isTrusted` değeri `false` olduğu için bazı oyunlar bunları yok sayabilir.
+
+Güncellemek için yeni ZIP’in içeriğini eklentiyi yüklediğin klasöre çıkar ve `chrome://extensions` sayfasında **Yenile** düğmesine bas.
 
 ## Windows
 
