@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Mause Seri Tık",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Seçtiğiniz Chrome sekmesinde sol fare tuşunu seri tıklamaya dönüştürür.",
   "permissions": ["activeTab", "scripting", "storage"],
   "icons": {

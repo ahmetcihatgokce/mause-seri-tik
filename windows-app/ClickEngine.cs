@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.Win32.SafeHandles;
@@ -8,6 +9,7 @@ namespace MauseSeriTik
 {
     internal sealed class ClickEngine : IDisposable
     {
+        private static readonly int MouseFlagsOffset = Marshal.OffsetOf(typeof(NativeMethods.HookData), "Flags").ToInt32();
         private readonly object gate = new object();
         private readonly AutoResetEvent wake = new AutoResetEvent(false);
         private readonly Thread worker;
@@ -17,6 +19,8 @@ namespace MauseSeriTik
         private TargetWindow target;
         private ClickSequence sequence;
         private TargetWindow sequenceWindow;
+        private AimSettings aimSettings;
+        private ClickSequence aimSequence;
         private Injection pending;
         private ClickMode mode;
         private int rate;
@@ -52,6 +56,15 @@ namespace MauseSeriTik
                 CancelSequence();
             }
             wake.Set();
+        }
+
+        internal void ConfigureAim(AimSettings settings)
+        {
+            lock (gate)
+            {
+                aimSettings = settings;
+                aimSequence = null;
+            }
         }
 
         internal void SetTarget(TargetWindow window)
@@ -112,14 +125,27 @@ namespace MauseSeriTik
         private IntPtr OnMouse(int code, IntPtr message, IntPtr data)
         {
             bool down = message == new IntPtr(NativeMethods.WmLButtonDown);
-            if (code >= 0 && (down || message == new IntPtr(NativeMethods.WmLButtonUp)))
+            bool up = message == new IntPtr(NativeMethods.WmLButtonUp);
+            bool move = message == new IntPtr(NativeMethods.WmMouseMove);
+            if (code >= 0 && (down || up || move))
             {
+                if (move && (unchecked((uint)Marshal.ReadInt32(data, MouseFlagsOffset)) & NativeMethods.MouseInjected) == 0)
+                    return NativeMethods.CallNextHookEx(hook, code, message, data);
+
                 var info = (NativeMethods.HookData)Marshal.PtrToStructure(data, typeof(NativeMethods.HookData));
                 ulong marker = info.ExtraInfo.ToUInt64();
                 if ((info.Flags & NativeMethods.MouseInjected) == 0)
-                    HandlePhysicalClick(down, info.Position);
-                else if (marker >> 16 == markerPrefix >> 16 && HandleInjectedClick(down, (uint)marker, info.Position))
-                    return new IntPtr(1);
+                {
+                    if (!move)
+                        HandlePhysicalClick(down, info.Position);
+                }
+                else if (marker >> 16 == markerPrefix >> 16)
+                {
+                    bool suppress = move ? !AcceptsAimMove((uint)marker) :
+                        HandleInjectedClick(down, (uint)marker, info.Position);
+                    if (suppress)
+                        return new IntPtr(1);
+                }
             }
             return NativeMethods.CallNextHookEx(hook, code, message, data);
         }
@@ -134,6 +160,7 @@ namespace MauseSeriTik
                         return;
                     sequence = new ClickSequence(mode, rate, count, Stopwatch.GetTimestamp());
                     sequenceWindow = target;
+                    aimSequence = aimSettings == null ? null : sequence;
                     wake.Set();
                     return;
                 }
@@ -143,8 +170,22 @@ namespace MauseSeriTik
                 // Windows receives the real up, which also closes any synthetic down already delivered.
                 sequence = null;
                 sequenceWindow = null;
+                aimSequence = null;
                 wake.Set();
             }
+        }
+
+        private bool AcceptsAimMove(uint marker)
+        {
+            lock (gate)
+                return pending != null && pending.Marker == marker && AcceptsAim(pending) &&
+                    sequenceWindow.AcceptsCursor();
+        }
+
+        private bool AcceptsAim(Injection request)
+        {
+            return armed && request.Aim != null && request.Aim == aimSettings && request.Sequence == sequence &&
+                request.Sequence.WantsDown;
         }
 
         private bool HandleInjectedClick(bool down, uint marker, NativeMethods.Point point)
@@ -168,6 +209,8 @@ namespace MauseSeriTik
         {
             int inputSize = Marshal.SizeOf(typeof(NativeMethods.Input));
             var input = new NativeMethods.Input[1];
+            var movement = new NativeMethods.Input[1];
+            using (var aim = new AimAssist())
             using (var timer = new ClickTimer(wake))
             {
                 while (true)
@@ -206,6 +249,7 @@ namespace MauseSeriTik
                     Injection request = Prepare(current);
                     if (request == null)
                         continue;
+                    MoveAim(request, window, aim, movement, inputSize);
                     input[0].Mouse.Flags = request.Down ? NativeMethods.MouseLeftDown : NativeMethods.MouseLeftUp;
                     input[0].Mouse.ExtraInfo = new UIntPtr(request.Marker);
 
@@ -218,6 +262,31 @@ namespace MauseSeriTik
             }
         }
 
+        private void MoveAim(Injection request, TargetWindow window, AimAssist assist,
+            NativeMethods.Input[] movement, int inputSize)
+        {
+            Rectangle bounds;
+            if (request.Aim == null || !window.TryGetClientBounds(out bounds))
+                return;
+
+            var center = new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2);
+            Point correction;
+            if (!assist.TryFindCorrection(bounds, center, request.Aim, out correction) || correction.IsEmpty)
+                return;
+
+            lock (gate)
+            {
+                if (!AcceptsAim(request))
+                    return;
+            }
+
+            movement[0].Mouse.X = correction.X;
+            movement[0].Mouse.Y = correction.Y;
+            movement[0].Mouse.Flags = NativeMethods.MouseMove | NativeMethods.MouseMoveNoCoalesce;
+            movement[0].Mouse.ExtraInfo = new UIntPtr(request.Marker);
+            NativeMethods.SendInput(1, movement, inputSize);
+        }
+
         private Injection Prepare(ClickSequence current)
         {
             lock (gate)
@@ -225,7 +294,14 @@ namespace MauseSeriTik
                 if (sequence != current || current.Due == ClickSequence.Finished)
                     return null;
                 uint marker = markerPrefix | (++markerCounter & 0xFFFF);
-                pending = new Injection(current, marker, current.WantsDown);
+                bool down = current.WantsDown;
+                AimSettings aim = null;
+                if (down && aimSequence == current)
+                {
+                    aim = aimSettings;
+                    aimSequence = null;
+                }
+                pending = new Injection(current, marker, down, aim);
                 return pending;
             }
         }
@@ -265,6 +341,7 @@ namespace MauseSeriTik
 
         private void CancelSequence()
         {
+            aimSequence = null;
             if (sequence != null)
                 sequence.Cancel();
         }
@@ -274,13 +351,15 @@ namespace MauseSeriTik
             internal readonly ClickSequence Sequence;
             internal readonly uint Marker;
             internal readonly bool Down;
+            internal readonly AimSettings Aim;
             internal bool Observed;
 
-            internal Injection(ClickSequence sequence, uint marker, bool down)
+            internal Injection(ClickSequence sequence, uint marker, bool down, AimSettings aim)
             {
                 Sequence = sequence;
                 Marker = marker;
                 Down = down;
+                Aim = aim;
             }
         }
 

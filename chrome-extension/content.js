@@ -5,6 +5,7 @@
   globalThis.mauseSeriTikInitialized = true;
 
   const { defaults, normalize } = globalThis.MauseSeriTikSettings;
+  const aim = globalThis.MauseSeriTikAim;
   const typingInputTypes = new Set([
     "date", "datetime-local", "email", "file", "month", "number", "password",
     "search", "tel", "text", "time", "url", "week",
@@ -15,6 +16,48 @@
   let stopChannel = null;
   let press = null;
   let timeout = null;
+  let forwardHeld = false;
+  let sprintTarget = null;
+
+  function lockedCanvas() {
+    const lock = document.pointerLockElement;
+    return lock?.tagName === "CANVAS" ? lock : lock?.querySelector("canvas");
+  }
+
+  function dispatchShift(target, down, manualShift = false) {
+    target.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", {
+      key: "Shift", code: "ShiftLeft", location: 1, keyCode: 16, which: 16,
+      shiftKey: down || manualShift, bubbles: true, cancelable: true, composed: true,
+    }));
+  }
+
+  function releaseSprint(manualShift = false) {
+    const target = sprintTarget;
+    sprintTarget = null;
+    if (target?.isConnected) {
+      dispatchShift(target, false, manualShift);
+    } else if (target) {
+      dispatchShift(window, false, manualShift);
+    }
+  }
+
+  function startSprint() {
+    if (!settings.autoSprint || !forwardHeld || sprintTarget || document.hidden) {
+      return;
+    }
+    const target = lockedCanvas();
+    if (target?.isConnected) {
+      sprintTarget = target;
+      dispatchShift(target, true);
+    }
+  }
+
+  function stopInputs() {
+    stopSequence();
+    forwardHeld = false;
+    releaseSprint();
+    aim?.stop();
+  }
 
   function stopSequence(release = "both") {
     window.clearTimeout(timeout);
@@ -35,7 +78,7 @@
     sessionId = null;
     controls?.abort();
     controls = null;
-    stopSequence();
+    stopInputs();
   }
 
   function pointerPosition(event) {
@@ -61,6 +104,22 @@
       button: 0,
       buttons,
     };
+  }
+
+  function adjustAim(current) {
+    const canvas = lockedCanvas();
+    if (!canvas || !aim || !settings.aimAssist) {
+      return false;
+    }
+
+    const movement = aim.adjustment(canvas, settings.aimColor);
+    if (!movement) {
+      return false;
+    }
+    canvas.dispatchEvent(new MouseEvent("mousemove", {
+      ...mouseDetails(current, current.otherButtons), ...movement, button: -1,
+    }));
+    return true;
   }
 
   function dispatchPointer(current, type, details) {
@@ -121,6 +180,13 @@
     } else if (current.syntheticDown) {
       finishSyntheticPress(current, "both", true);
     } else {
+      if (current.aimPending) {
+        current.aimPending = false;
+        adjustAim(current);
+        if (press !== current) {
+          return;
+        }
+      }
       current.remaining -= 1;
       dispatchDown(current);
       if (current.fast && press === current) {
@@ -157,9 +223,14 @@
       delay: fast ? Math.ceil(1000 / settings.rate) : Math.ceil(500 / settings.gameRate),
       initialGameRelease: !fast,
       syntheticDown: false,
+      aimPending: false,
       fast,
     };
-    schedule(press);
+    const current = press;
+    if (settings.aimAssist) {
+      current.aimPending = !adjustAim(current);
+    }
+    schedule(current);
   }
 
   function onPointerUp(event) {
@@ -212,27 +283,79 @@
 
   function onVisibilityChange() {
     if (document.hidden) {
-      stopSequence();
+      stopInputs();
     }
   }
 
   function onPointerLockChange() {
     const target = document.pointerLockElement;
     if (!target) {
-      stopSequence();
-    } else if (press && !press.syntheticDown) {
+      stopInputs();
+      return;
+    }
+    if (press && !press.syntheticDown) {
       press.target = target;
+    }
+    if (settings.aimAssist) {
+      aim?.watch(lockedCanvas());
     }
   }
 
   function onKeyDown(event) {
-    if (event.isTrusted && event.key === "Escape") {
+    if (!event.isTrusted) {
+      return;
+    }
+    if (event.key === "Escape") {
       stopExtension(true);
+      return;
+    }
+    if (!settings.autoSprint) {
+      return;
+    }
+    if (event.key === "Shift" && sprintTarget) {
+      if (event.code === "ShiftLeft") {
+        // The real key now owns the same Shift state. Its keyup will release it.
+        sprintTarget = null;
+      } else {
+        releaseSprint(true);
+      }
+      return;
+    }
+    if (event.code === "KeyW" && !event.repeat && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      const target = event.composedPath()[0];
+      forwardHeld = Boolean(lockedCanvas())
+        && !event.isComposing && (!(target instanceof Element) || !isTypingTarget(target));
+      if (!event.shiftKey) {
+        startSprint();
+      }
+    }
+  }
+
+  function onKeyUp(event) {
+    if (!event.isTrusted) {
+      return;
+    }
+    if (event.code === "KeyW") {
+      forwardHeld = false;
+      releaseSprint(event.shiftKey);
+    } else if (event.key === "Shift" && !event.shiftKey && forwardHeld) {
+      // Let the game see the real Shift release before taking over again.
+      queueMicrotask(startSprint);
+    }
+  }
+
+  function onFocusIn(event) {
+    if (event.target instanceof Element && isTypingTarget(event.target)) {
+      forwardHeld = false;
+      releaseSprint();
     }
   }
 
   function enable(nextSessionId) {
-    stopSequence();
+    stopInputs();
+    if (settings.aimAssist) {
+      aim?.watch(lockedCanvas());
+    }
     stopChannel?.close();
     sessionId = typeof nextSessionId === "string" ? nextSessionId : null;
     stopChannel = sessionId ? new BroadcastChannel(`mause-seri-tik:${sessionId}`) : null;
@@ -257,7 +380,9 @@
     window.addEventListener("pointercancel", onPointerCancel, listenerOptions);
     window.addEventListener("mouseout", onMouseOut, listenerOptions);
     window.addEventListener("keydown", onKeyDown, listenerOptions);
-    window.addEventListener("blur", () => stopSequence(), { signal: controls.signal });
+    window.addEventListener("keyup", onKeyUp, listenerOptions);
+    window.addEventListener("focusin", onFocusIn, listenerOptions);
+    window.addEventListener("blur", stopInputs, { signal: controls.signal });
     window.addEventListener("pagehide", () => stopExtension(), listenerOptions);
     document.addEventListener("visibilitychange", onVisibilityChange, listenerOptions);
     document.addEventListener("pointerlockchange", onPointerLockChange, listenerOptions);
@@ -272,8 +397,11 @@
       case "status":
         break;
       case "update":
-        stopSequence();
+        stopInputs();
         settings = normalize(message.settings);
+        if (controls && settings.aimAssist) {
+          aim?.watch(lockedCanvas());
+        }
         break;
       case "enable":
         settings = normalize(message.settings);

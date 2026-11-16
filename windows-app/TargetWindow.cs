@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.Text;
 
 namespace MauseSeriTik
@@ -53,6 +54,19 @@ namespace MauseSeriTik
         {
             NativeMethods.Point point;
             return NativeMethods.GetCursorPos(out point) && AcceptsPoint(point);
+        }
+
+        internal bool TryGetClientBounds(out Rectangle bounds)
+        {
+            bounds = Rectangle.Empty;
+            NativeMethods.Rect rect;
+            var origin = new NativeMethods.Point();
+            if (!IsForeground() || !NativeMethods.GetClientRect(handle, out rect) ||
+                !NativeMethods.ClientToScreen(handle, ref origin))
+                return false;
+
+            bounds = new Rectangle(origin.X, origin.Y, rect.Right - rect.Left, rect.Bottom - rect.Top);
+            return bounds.Width > 0 && bounds.Height > 0;
         }
 
         private static IntPtr Root(IntPtr window)

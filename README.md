@@ -22,6 +22,8 @@ Sol tuşla dene. `Esc` eklentiyi o sekmede kapatır. Sayfayı yenilediğinde ekl
 
 Güncellemek için yeni ZIP’in içeriğini eklentiyi yüklediğin klasöre çıkar ve `chrome://extensions` sayfasında **Yenile** düğmesine bas.
 
+**Oyun kontrolleri** altında **Otomatik nişan** seçeneğini açıp oyun alanında görünen hedefin belirgin rengini seçebilirsin. Nişan yardımı, oyun fareyi oyun alanına kilitlediğinde imleç merkezine yakın renk eşleşmelerini arar. **W basılıyken Shift ile koş** seçeneği de fare oyun alanına kilitliyken çalışır.
+
 ## Windows
 
 1. `Mause-Seri-Tik.exe` dosyasını aç. Kurulum gerektirmez.
@@ -30,6 +32,10 @@ Güncellemek için yeni ZIP’in içeriğini eklentiyi yüklediğin klasöre ç�
 4. `F8` ile seri tıklamayı aç veya kapat. Herhangi bir anda `F9` ile durdur.
 
 Program, seçili pencere öndeyken ve imleç pencerenin üzerindeyken sol tuşu işler. Windows uygulaması imzasızdır. Windows, daha yüksek yetkiyle çalışan uygulamalara giriş göndermeyi kısıtlayabilir. Oyunun giriş işleme şekli, kare hızı ve kendi atış hızı sınırı, kaç tıklamanın işleneceğini belirler.
+
+**Renkle nişan yardımı** için hedef rengini seçebilir veya seçili oyun penceresinde imleci o rengin üstüne getirip `F6` ile örnek alabilirsin. Tam ekranda nişangâh ortadayken kullan. Windows, sol tuş basılıyken seri içindeki ilk ek tıklamadan önce bir fare düzeltmesi yapabilir. **Otomatik koşma** seçeneği, seçili oyun penceresi öndeyken W’ye basılı tuttuğunda oyunun Shift ile koşma kontrolünü kullanır.
+
+Nişan ve koşma seçenekleri başlangıçta kapalıdır ve ayrı ayrı açılır. Nişan yardımı görünür renk eşleşmesini izler. Aynı renkteki farklı oyuncular veya nesneler eşleşebilir. İsabet ve koşu hızı oyunun kendi kurallarına bağlıdır.
 
 | Mod | Ne zaman durur? |
 | --- | --- |

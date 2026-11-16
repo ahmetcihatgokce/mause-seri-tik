@@ -11,6 +11,8 @@ namespace MauseSeriTik
         private const int TargetHotKey = 1;
         private const int ToggleHotKey = 2;
         private const int StopHotKey = 3;
+        private const int AimColorHotKey = 4;
+        private const string SprintHint = "W basılıyken oyunun Shift tuşu tutulur.";
         private static readonly Color Back = Color.FromArgb(17, 22, 29);
         private static readonly Color Surface = Color.FromArgb(33, 40, 50);
         private static readonly Color Foreground = Color.FromArgb(242, 245, 249);
@@ -21,6 +23,10 @@ namespace MauseSeriTik
         private readonly ComboBox mode = new ComboBox();
         private readonly NumericUpDown rate = new NumericUpDown();
         private readonly NumericUpDown count = new NumericUpDown();
+        private readonly CheckBox aimEnabled;
+        private readonly CheckBox sprintEnabled;
+        private readonly Label aimHelp;
+        private readonly Label sprintHelp;
         private readonly Label targetLabel;
         private readonly Label status;
         private readonly Label hotkeys;
@@ -30,12 +36,15 @@ namespace MauseSeriTik
         private readonly uint processId = (uint)Process.GetCurrentProcess().Id;
         private TargetWindow target;
         private ClickEngine engine;
+        private SprintAssist sprint;
+        private Color? aimColor;
         private DateTime captureAt;
         private string notice;
         private string stopKeyText;
         private bool captureKeyRegistered;
         private bool toggleKeyRegistered;
         private bool stopKeyRegistered;
+        private bool aimColorKeyRegistered;
         private bool closing;
 
         internal MainForm()
@@ -47,7 +56,8 @@ namespace MauseSeriTik
             MaximizeBox = false;
             AutoScaleDimensions = new SizeF(96, 96);
             AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(494, 492);
+            AutoScroll = true;
+            ClientSize = new Size(494, 630);
             BackColor = Back;
             ForeColor = Foreground;
             Font = new Font("Segoe UI", 10f);
@@ -87,12 +97,25 @@ namespace MauseSeriTik
             rate.ValueChanged += delegate { Configure(); };
             count.ValueChanged += delegate { Configure(); };
 
-            toggle = AddButton("Etkinleştir", 24, 353, 446, 42, true);
+            aimEnabled = AddCheckBox("Renkle nişan yardımı", 24, 340, 264);
+            aimEnabled.AccessibleDescription = "İlk otomatik tıklamadan önce, seçilen renge göre nişanı düzeltmeyi dener.";
+            aimEnabled.CheckedChanged += delegate { ConfigureAim(); };
+            Button pickColor = AddButton("Hedef rengi seç", 302, 340, 168, 34, false);
+            pickColor.Click += delegate { PickAimColor(); };
+            aimHelp = AddLabel("Hedef rengi seçin. Tam ekranda, nişangâh ortadayken kullanın.",
+                24, 380, 446, 46, Muted);
+
+            sprintEnabled = AddCheckBox("Otomatik koşma", 24, 426, 446);
+            sprintEnabled.AccessibleDescription = SprintHint;
+            sprintEnabled.CheckedChanged += delegate { RefreshState(); };
+            sprintHelp = AddLabel(SprintHint, 24, 454, 446, 34, Muted);
+
+            toggle = AddButton("Etkinleştir", 24, 493, 446, 42, true);
             toggle.Enabled = false;
             toggle.Click += delegate { Toggle(); };
-            status = AddLabel("Kapalı · Önce bir hedef pencere seçin.", 24, 403, 446, 45, Muted);
+            status = AddLabel("Kapalı · Önce bir hedef pencere seçin.", 24, 543, 446, 45, Muted);
             status.TextAlign = ContentAlignment.MiddleLeft;
-            hotkeys = AddLabel("F7 pencere seç      F8 aç/kapat      F9 acil durdur", 24, 456, 446, 23, Muted);
+            hotkeys = AddLabel("F7 pencere seç      F8 aç/kapat      F9 acil durdur", 24, 596, 446, 24, Muted);
 
             UIRefresh.Tick += delegate { RefreshState(); };
             AcceptButton = toggle;
@@ -101,10 +124,18 @@ namespace MauseSeriTik
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
+            Rectangle workingArea = Screen.FromControl(this).WorkingArea;
+            if (Height > workingArea.Height)
+            {
+                Height = workingArea.Height;
+                Top = workingArea.Top;
+            }
             engine = new ClickEngine();
+            sprint = new SprintAssist(this);
             captureKeyRegistered = Register(TargetHotKey, Keys.F7, 0);
             toggleKeyRegistered = Register(ToggleHotKey, Keys.F8, 0);
             stopKeyRegistered = Register(StopHotKey, Keys.F9, 0);
+            aimColorKeyRegistered = Register(AimColorHotKey, Keys.F6, 0);
             stopKeyText = "F9";
             if (!stopKeyRegistered)
             {
@@ -118,6 +149,7 @@ namespace MauseSeriTik
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SystemEvents.SessionSwitch += OnSessionSwitch;
             Configure();
+            ConfigureAim();
             RefreshState();
             UIRefresh.Start();
         }
@@ -140,6 +172,9 @@ namespace MauseSeriTik
                         notice = "Acil durdurma uygulandı.";
                         RefreshState();
                         break;
+                    case AimColorHotKey:
+                        SampleAimColor();
+                        break;
                 }
             }
             base.WndProc(ref message);
@@ -147,17 +182,18 @@ namespace MauseSeriTik
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (engine != null && !engine.HasStopped)
+            if (!closing)
             {
-                if (!closing)
-                {
-                    closing = true;
-                    SystemEvents.PowerModeChanged -= OnPowerModeChanged;
-                    SystemEvents.SessionSwitch -= OnSessionSwitch;
+                closing = true;
+                SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+                SystemEvents.SessionSwitch -= OnSessionSwitch;
+                if (sprint != null)
+                    sprint.Configure(null, false);
+                if (engine != null && !engine.HasStopped)
                     engine.RequestShutdown();
-                }
-                e.Cancel = e.CloseReason != CloseReason.WindowsShutDown;
             }
+            if (engine != null && !engine.HasStopped)
+                e.Cancel = e.CloseReason != CloseReason.WindowsShutDown;
             base.OnFormClosing(e);
         }
 
@@ -170,6 +206,10 @@ namespace MauseSeriTik
                 NativeMethods.UnregisterHotKey(Handle, ToggleHotKey);
             if (stopKeyRegistered)
                 NativeMethods.UnregisterHotKey(Handle, StopHotKey);
+            if (aimColorKeyRegistered)
+                NativeMethods.UnregisterHotKey(Handle, AimColorHotKey);
+            if (sprint != null)
+                sprint.Dispose();
             if (engine != null && engine.HasStopped)
                 engine.Dispose();
             base.OnFormClosed(e);
@@ -190,10 +230,22 @@ namespace MauseSeriTik
 
         private void SuspendAutomation()
         {
+            if (IsDisposed || Disposing)
+                return;
+            if (InvokeRequired)
+            {
+                if (IsHandleCreated)
+                {
+                    try { BeginInvoke((Action)SuspendAutomation); }
+                    catch (InvalidOperationException) { }
+                }
+                return;
+            }
             if (!closing)
             {
                 captureAt = DateTime.MinValue;
                 engine.Disarm();
+                RefreshState();
             }
         }
 
@@ -245,14 +297,61 @@ namespace MauseSeriTik
                 engine.Configure((ClickMode)mode.SelectedIndex, (int)rate.Value, (int)count.Value);
         }
 
+        private void ConfigureAim()
+        {
+            Color? color = aimColor;
+            if (engine != null)
+                engine.ConfigureAim(aimEnabled.Checked && color.HasValue
+                    ? new AimSettings(color.Value, radius: 80, tolerance: 24, sensitivity: 0.45) : null);
+
+            string selection = color.HasValue ? "Renk #" + (color.Value.ToArgb() & 0xFFFFFF).ToString("X6") + "." :
+                "Hedef rengi seçin.";
+            string shortcut = aimColorKeyRegistered ? " İmleci renge getirip F6'ya basın." : string.Empty;
+            aimHelp.ForeColor = Muted;
+            aimHelp.Text = selection + shortcut + Environment.NewLine + "Tam ekranda, nişangâh ortadayken kullanın.";
+        }
+
+        private void PickAimColor()
+        {
+            using (var dialog = new ColorDialog { Color = aimColor.GetValueOrDefault(Color.White), FullOpen = true })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                    return;
+                aimColor = dialog.Color;
+                ConfigureAim();
+            }
+        }
+
+        private void SampleAimColor()
+        {
+            NativeMethods.Point cursor;
+            Color color;
+            if (target == null || !NativeMethods.GetCursorPos(out cursor) || !target.AcceptsPoint(cursor))
+            {
+                aimHelp.ForeColor = Error;
+                aimHelp.Text = "Önce hedef pencereye geçin. İmleci hedef rengine getirip F6'ya basın.";
+                return;
+            }
+            if (!AimAssist.TryReadColor(new Point(cursor.X, cursor.Y), out color))
+            {
+                aimHelp.ForeColor = Error;
+                aimHelp.Text = "Renk okunamadı. F6 ile tekrar deneyin veya hedef rengini seçin.";
+                return;
+            }
+            aimColor = color;
+            ConfigureAim();
+        }
+
         private void RefreshState()
         {
             if (closing)
             {
-                if (engine.HasStopped)
+                if (engine == null || engine.HasStopped)
                     Close();
                 return;
             }
+            if (engine == null)
+                return;
 
             if (captureAt != DateTime.MinValue && DateTime.UtcNow >= captureAt)
             {
@@ -269,6 +368,15 @@ namespace MauseSeriTik
             }
 
             bool armed = engine.Armed;
+            if (sprint != null)
+            {
+                sprint.Configure(target, sprintEnabled.Checked && armed);
+                string sprintFailure = sprint.HookInstalled ? sprint.Failure :
+                    "Windows koşma dinleyicisi açılamadı (kod: " + sprint.HookError + ").";
+                bool sprintFailed = sprintEnabled.Checked && !string.IsNullOrEmpty(sprintFailure);
+                sprintHelp.ForeColor = sprintFailed ? Error : Muted;
+                sprintHelp.Text = sprintFailed ? sprintFailure : SprintHint;
+            }
             toggle.Text = armed ? "Durdur" : "Etkinleştir";
             toggle.Enabled = target != null && engine.HookInstalled && stopKeyRegistered &&
                 captureAt == DateTime.MinValue;
@@ -319,6 +427,14 @@ namespace MauseSeriTik
             button.SetBounds(x, y, width, height);
             Controls.Add(button);
             return button;
+        }
+
+        private CheckBox AddCheckBox(string text, int x, int y, int width)
+        {
+            var checkBox = new CheckBox { Text = text, ForeColor = Foreground, UseMnemonic = false };
+            checkBox.SetBounds(x, y, width, 29);
+            Controls.Add(checkBox);
+            return checkBox;
         }
 
         private void AddNumber(NumericUpDown number, string name, int x, int y, int min, int max, int start)

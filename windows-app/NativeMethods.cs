@@ -7,10 +7,13 @@ namespace MauseSeriTik
     internal static class NativeMethods
     {
         internal const int WhMouseLl = 14;
+        internal const int WmMouseMove = 0x0200;
         internal const int WmLButtonDown = 0x0201;
         internal const int WmLButtonUp = 0x0202;
         internal const int WmHotkey = 0x0312;
         internal const uint MouseInjected = 0x03;
+        internal const uint MouseMove = 0x0001;
+        internal const uint MouseMoveNoCoalesce = 0x2000;
         internal const uint MouseLeftDown = 0x02;
         internal const uint MouseLeftUp = 0x04;
         internal const uint RootAncestor = 2;
@@ -25,6 +28,15 @@ namespace MauseSeriTik
         {
             internal int X;
             internal int Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct Rect
+        {
+            internal int Left;
+            internal int Top;
+            internal int Right;
+            internal int Bottom;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -84,6 +96,12 @@ namespace MauseSeriTik
 
         [DllImport("user32.dll")]
         internal static extern bool GetCursorPos(out Point point);
+
+        [DllImport("user32.dll")]
+        internal static extern bool GetClientRect(IntPtr window, out Rect rect);
+
+        [DllImport("user32.dll")]
+        internal static extern bool ClientToScreen(IntPtr window, ref Point point);
 
         [DllImport("user32.dll")]
         internal static extern IntPtr GetAncestor(IntPtr window, uint flags);

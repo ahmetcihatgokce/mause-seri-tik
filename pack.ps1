@@ -11,7 +11,7 @@ if ($manifest.manifest_version -ne 3 -or $manifest.version -notmatch '^\d+\.\d+\
 }
 
 $chromeZip = Join-Path $OutDir 'Mause-Seri-Tik-Chrome.zip'
-$chromeEntries = @('manifest.json', 'popup.html', 'popup.css', 'popup.js', 'settings.js', 'content.js', 'icons')
+$chromeEntries = @('manifest.json', 'popup.html', 'popup.css', 'popup.js', 'settings.js', 'aim.js', 'content.js', 'icons')
 $chromePaths = @($chromeEntries | ForEach-Object { Join-Path $chromeDir $_ })
 $chromePaths += Join-Path $PSScriptRoot 'LICENSE'
 Compress-Archive -LiteralPath $chromePaths -DestinationPath $chromeZip -Force

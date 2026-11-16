@@ -48,6 +48,17 @@
           </div>
           <input type="range" id="burst" min="2" max="30" value="5">
         </div>
+
+        <fieldset class="game-options">
+          <legend>Oyun kontrolleri</legend>
+          <label class="check-field"><input type="checkbox" id="aim-assist"> Otomatik nişan</label>
+          <div class="color-field">
+            <label for="aim-color">Hedef rengi</label>
+            <input type="color" id="aim-color" value="#ff3b30" aria-describedby="aim-help" disabled>
+          </div>
+          <p id="aim-help">Nişan almak istediğin bölgedeki belirgin rengi seç.</p>
+          <label class="check-field"><input type="checkbox" id="auto-sprint"> W basılıyken Shift ile koş</label>
+        </fieldset>
       </form>
     </main>
 

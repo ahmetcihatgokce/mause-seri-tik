@@ -7,6 +7,9 @@ const burst = document.querySelector("#burst");
 const burstField = document.querySelector("#burst-field");
 const rateValue = document.querySelector("#rate-value");
 const burstValue = document.querySelector("#burst-value");
+const aimAssist = document.querySelector("#aim-assist");
+const aimColor = document.querySelector("#aim-color");
+const autoSprint = document.querySelector("#auto-sprint");
 const status = document.querySelector("#status");
 const toggle = document.querySelector("#toggle");
 
@@ -38,11 +41,16 @@ function renderSettings() {
   rate.setAttribute("aria-valuetext", `${rate.value} tıklama/saniye`);
   burst.disabled = mode.value === "hold";
   burstField.setAttribute("aria-disabled", String(burst.disabled));
+  aimAssist.checked = selected.aimAssist;
+  aimColor.value = selected.aimColor;
+  aimColor.disabled = !selected.aimAssist;
+  autoSprint.checked = selected.autoSprint;
 }
 
 function changeSettings(event) {
   const next = {
     ...selected, mode: mode.value, profile: profile.value, burst: burst.valueAsNumber,
+    aimAssist: aimAssist.checked, aimColor: aimColor.value, autoSprint: autoSprint.checked,
   };
   if (event.target === rate) {
     const rateKey = next.profile === "game" ? "gameRate" : "rate";
@@ -69,7 +77,7 @@ function tabStatus() {
 }
 
 async function enableTab() {
-  const files = ["settings.js", "content.js"];
+  const files = ["settings.js", "aim.js", "content.js"];
   let frames;
   try {
     frames = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files });
