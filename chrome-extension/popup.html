@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mause Seri Tık</title>
+    <link rel="stylesheet" href="popup.css">
+    <script src="settings.js" defer></script>
+    <script src="popup.js" defer></script>
+  </head>
+  <body>
+    <header class="heading">
+      <img src="icons/icon48.png" alt="" width="38" height="38">
+      <h1>Mause Seri Tık</h1>
+    </header>
+
+    <main>
+      <section class="activation" aria-label="Sekme durumu">
+        <p id="status" class="status" role="status">Sekme kontrol ediliyor…</p>
+        <button type="button" id="toggle" disabled>Bu sekmede başlat</button>
+      </section>
+
+      <form aria-label="Tıklama ayarları">
+        <label for="mode">Tıklama modu</label>
+        <select id="mode">
+          <option value="hold">Basılı tut</option>
+          <option value="burst">Sınırlı seri</option>
+        </select>
+
+        <div class="range-field">
+          <div class="range-heading">
+            <label for="rate">Hedef hız</label>
+            <output for="rate" id="rate-value">250 tık/sn</output>
+          </div>
+          <input type="range" id="rate" min="1" max="250" value="250">
+        </div>
+
+        <div class="range-field" id="burst-field">
+          <div class="range-heading">
+            <label for="burst">Seri üst sınırı</label>
+            <output for="burst" id="burst-value">5</output>
+          </div>
+          <input type="range" id="burst" min="2" max="30" value="5">
+        </div>
+      </form>
+    </main>
+
+    <footer>
+      <p>Sol tuşu bıraktığında seri durur. <kbd>Esc</kbd> eklentiyi kapatır.</p>
+      <p>Bazı oyunlar sayfa içi seri tıklamaları kabul etmeyebilir.</p>
+    </footer>
+  </body>
+</html>

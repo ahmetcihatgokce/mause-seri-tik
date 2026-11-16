@@ -1,0 +1,32 @@
+name: Build packages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Chrome JavaScript
+        shell: pwsh
+        run: |
+          Get-ChildItem chrome-extension -Filter *.js | ForEach-Object {
+            node --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Build Windows executable and Chrome zip
+        shell: pwsh
+        run: ./pack.ps1
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mause-Seri-Tik
+          path: dist/*
+          if-no-files-found: error
